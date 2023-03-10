@@ -1,10 +1,11 @@
-use tokio::io;
-use tokio::net::TcpListener;
-use tokio::io::AsyncWriteExt;
-use tokio::time::{sleep, Duration};
 use rand::prelude::*;
 use rand_distr::Geometric;
 use rand_xoshiro::Xoshiro256StarStar;
+use std::io::Write;
+use std::time::Instant;
+use tokio::io;
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -21,18 +22,24 @@ async fn main() -> io::Result<()> {
         eprintln!("Serving {:?}", client_info);
 
         tokio::spawn(async move {
+            let mut buf = Vec::new();
+            let mut cnt = 0;
+            let t_start = Instant::now();
             loop {
                 let s: u64 = distr.sample(&mut rng);
-                let data = format!("{}\n", s);
-                let bytes = data.as_bytes();
-                if socket.write_all(bytes).await.is_err() {
+                buf.clear();
+                writeln!(buf, "{}", s).unwrap();
+                cnt += 1;
+                if socket.write_all(&buf).await.is_err() {
                     break;
                 }
-                sleep(Duration::from_millis(10)).await;
             }
-            eprintln!("done serving {:?}", client_info);
+            let t_end = Instant::now();
+            let throughput = (cnt as f64) / (t_end - t_start).as_secs_f64();
+            eprintln!(
+                "done serving {:?} (throughput {} nums/sec)",
+                client_info, throughput
+            );
         });
     }
 }
-
-
