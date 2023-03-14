@@ -4,7 +4,7 @@ use rand_xoshiro::Xoshiro256StarStar;
 use std::io::Write;
 use std::time::Instant;
 use tokio::io;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::net::TcpListener;
 
 #[tokio::main]
@@ -18,10 +18,11 @@ async fn main() -> io::Result<()> {
         seeder.jump();
         let mut rng = seeder.clone();
 
-        let (mut socket, client_info) = listener.accept().await?;
+        let (socket, client_info) = listener.accept().await?;
         eprintln!("Serving {:?}", client_info);
 
         tokio::spawn(async move {
+            let mut socket = BufWriter::new(socket);
             let mut buf = Vec::new();
             let mut cnt = 0;
             let t_start = Instant::now();
