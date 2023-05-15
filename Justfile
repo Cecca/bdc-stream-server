@@ -1,7 +1,7 @@
 # Install the software as a systemd service and starts it
 install:
     cargo install --path .
-    test -d ~/.config/systemd/user || mkdir ~/.config/systemd/user
+    test -d ~/.config/systemd/user || mkdir -p ~/.config/systemd/user
     cp *.service ~/.config/systemd/user
     systemctl enable --user bdc-stream-server
     systemctl start --user bdc-stream-server
