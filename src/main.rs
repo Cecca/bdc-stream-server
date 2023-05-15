@@ -9,10 +9,11 @@ use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    let p = std::env::args().nth(1).unwrap().parse::<f64>().unwrap();
+    let port = std::env::args().nth(1).unwrap().parse::<usize>().expect("missing port number");
+    let p = std::env::args().nth(2).unwrap().parse::<f64>().expect("missing geometric distribution's probability");
     let distr = Geometric::new(p).unwrap();
     let mut seeder = Xoshiro256StarStar::seed_from_u64(1234);
-    let listener = TcpListener::bind("0.0.0.0:9999").await?;
+    let listener = TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
 
     loop {
         seeder.jump();
