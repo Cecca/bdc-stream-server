@@ -13,10 +13,12 @@ use tokio::net::TcpListener;
 struct Config {
     /// the port to listen to
     port: usize,
+    zipf_upper: u64,
     alpha_min: f64,
     alpha_max: f64,
     uniform_max: u64,
-    balance: f64,
+    prob_of_uniform: f64,
+    max_zipf_offset: u64,
 }
 
 impl Config {
@@ -43,15 +45,15 @@ async fn main() -> io::Result<()> {
         let config = Config::from_file(&config_path);
 
         // Set up distributions
-        let zipf_n = 1000;
+        let zipf_n = config.zipf_upper;
         let background = Uniform::new(0, config.uniform_max);
-        let balancer = Bernoulli::new(config.balance).unwrap();
+        let balancer = Bernoulli::new(config.prob_of_uniform).unwrap();
 
         seeder.jump();
         let mut rng = seeder.clone();
 
-        let alpha = Uniform::new(config.alpha_min, config.alpha_max).sample(&mut rng);
-        let offset = Uniform::new(1, 100).sample(&mut rng);
+        let alpha = Uniform::new_inclusive(config.alpha_min, config.alpha_max).sample(&mut rng);
+        let offset = Uniform::new(0, config.max_zipf_offset).sample(&mut rng);
         let distr = Zipf::new(zipf_n, alpha).unwrap();
 
         let (socket, client_info) = listener.accept().await?;
