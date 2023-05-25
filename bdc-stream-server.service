@@ -1,10 +1,10 @@
 [Unit]
-Description=The never-ending stream generator for BDC
+Description=The never-ending stream generator for BDC (test)
 After=network.target
 
 [Service]
 WorkingDirectory=%h
-ExecStart=%h/.cargo/bin/bdc-stream-server 8888 0.1
+ExecStart=%h/.cargo/bin/bdc-stream-server %h/streamer-test.toml
 Restart=always
 RestartSec=10
 
