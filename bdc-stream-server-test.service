@@ -1,5 +1,5 @@
 [Unit]
-Description=The never-ending stream generator for BDC
+Description=The never-ending stream generator for BDC (test)
 After=network.target
 
 [Service]
