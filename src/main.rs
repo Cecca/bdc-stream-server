@@ -1,26 +1,64 @@
 use rand::prelude::*;
-use rand_distr::Geometric;
+use rand_distr::{Bernoulli, Uniform, Zipf};
 use rand_xoshiro::Xoshiro256StarStar;
+use serde::Deserialize;
+use std::io::prelude::*;
 use std::io::Write;
 use std::time::Instant;
 use tokio::io;
 use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::net::TcpListener;
 
+#[derive(Deserialize, Debug, Clone, Copy)]
+struct Config {
+    /// the port to listen to
+    port: usize,
+    alpha_min: f64,
+    alpha_max: f64,
+    uniform_max: u64,
+    balance: f64,
+}
+
+impl Config {
+    fn from_file(path: &str) -> Self {
+        let mut f = std::fs::File::open(path).unwrap();
+        let mut cfg_str = String::new();
+        f.read_to_string(&mut cfg_str).unwrap();
+        toml::from_str(&cfg_str).unwrap()
+    }
+}
+
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    let port = std::env::args().nth(1).unwrap().parse::<usize>().expect("missing port number");
-    let p = std::env::args().nth(2).unwrap().parse::<f64>().expect("missing geometric distribution's probability");
-    let distr = Geometric::new(p).unwrap();
+    let config_path = std::env::args()
+        .nth(1)
+        .expect("missing the path to the configuration");
+
+    let config = Config::from_file(&config_path);
     let mut seeder = Xoshiro256StarStar::seed_from_u64(1234);
-    let listener = TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
+    let listener = TcpListener::bind(format!("0.0.0.0:{}", config.port)).await?;
 
     loop {
+        // Read config, which may have changed
+        let config = Config::from_file(&config_path);
+
+        // Set up distributions
+        let zipf_n = 1000;
+        let background = Uniform::new(0, config.uniform_max);
+        let balancer = Bernoulli::new(config.balance).unwrap();
+
         seeder.jump();
         let mut rng = seeder.clone();
 
+        let alpha = Uniform::new(config.alpha_min, config.alpha_max).sample(&mut rng);
+        let offset = Uniform::new(1, 100).sample(&mut rng);
+        let distr = Zipf::new(zipf_n, alpha).unwrap();
+
         let (socket, client_info) = listener.accept().await?;
-        eprintln!("Serving {:?}", client_info);
+        eprintln!(
+            "Serving {:?} with alpha {} offset {} {:?}",
+            client_info, alpha, offset, config
+        );
 
         tokio::spawn(async move {
             let mut socket = BufWriter::new(socket);
@@ -28,7 +66,11 @@ async fn main() -> io::Result<()> {
             let mut cnt = 0;
             let t_start = Instant::now();
             loop {
-                let s: u64 = distr.sample(&mut rng);
+                let s: u64 = if balancer.sample(&mut rng) {
+                    background.sample(&mut rng)
+                } else {
+                    offset + distr.sample(&mut rng).floor() as u64
+                };
                 buf.clear();
                 writeln!(buf, "{}", s).unwrap();
                 cnt += 1;
