@@ -7,8 +7,8 @@ install:
     test -f ~/streamer-test.toml || cp config-test.toml ~/streamer-test.toml
     systemctl enable --user bdc-stream-server
     systemctl enable --user bdc-stream-server-test
-    systemctl start --user bdc-stream-server
-    systemctl start --user bdc-stream-server-test
+    systemctl restart --user bdc-stream-server
+    systemctl restart --user bdc-stream-server-test
 
 # Run a stress test by reading from `nclients` simultaneous connections
 # 10 million bytes from a server at the given host:port pair
