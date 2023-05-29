@@ -12,7 +12,7 @@ use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 use tokio_utils::RateLimiter;
 
-#[derive(Deserialize, Debug, Clone, Copy)]
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq)]
 struct Config {
     /// the port to listen to
     port: usize,
@@ -45,11 +45,14 @@ async fn main() -> io::Result<()> {
 
     let _config_reader = tokio::spawn(async move {
         // watch for configuration changes
-        eprintln!("watching configuration file");
+        eprintln!("watching configuration file {:?}", config_path);
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
             let c = Config::from_file(&config_path);
-            *config2.write().await = c;
+            if (*config2.read().await) != c {
+                eprintln!("Configuration changed: {:?}", c);
+                *config2.write().await = c;
+            }
         }
     });
 
