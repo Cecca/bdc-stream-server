@@ -7,10 +7,13 @@ use std::io::Write;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::io;
-use tokio::io::{AsyncWriteExt, BufWriter};
+use tokio::io::AsyncBufReadExt;
+use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 use tokio_utils::RateLimiter;
+
+const DEFAULT_SEED: u64 = 1234;
 
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq)]
 struct Config {
@@ -23,6 +26,10 @@ struct Config {
     prob_of_uniform: f64,
     max_zipf_offset: u64,
     max_rate: f64,
+    /// if `true`, then the socket first reads an integer to be used as seed.
+    /// Otherwise just uses [[DEFAULT_SEED]] as the seed.
+    #[serde(default = "Config::default_ask_seed")]
+    ask_seed: bool,
 }
 
 impl Config {
@@ -31,6 +38,10 @@ impl Config {
         let mut cfg_str = String::new();
         f.read_to_string(&mut cfg_str).unwrap();
         toml::from_str(&cfg_str).unwrap()
+    }
+
+    fn default_ask_seed() -> bool {
+        true
     }
 }
 
@@ -55,8 +66,11 @@ async fn main() -> io::Result<()> {
             }
         }
     });
+    eprintln!(
+        "This instance will ask a seed every time: {}",
+        config.read().await.ask_seed
+    );
 
-    let mut seeder = Xoshiro256StarStar::seed_from_u64(1234);
     let listener = TcpListener::bind(format!("0.0.0.0:{}", config.read().await.port)).await?;
 
     loop {
@@ -65,20 +79,27 @@ async fn main() -> io::Result<()> {
         let background = Uniform::new(0, config.read().await.uniform_max);
         let balancer = Bernoulli::new(config.read().await.prob_of_uniform).unwrap();
 
-        seeder.jump();
-        let mut rng = seeder.clone();
+        let (mut socket, client_info) = listener.accept().await?;
+        let mut reader = BufReader::new(&mut socket);
+        eprintln!("Serving {:?}", client_info,);
+
+        let seed = if config.read().await.ask_seed {
+            let mut line = String::new();
+            reader.read_line(&mut line).await?;
+            let seed = line.trim().parse::<i64>().unwrap_or(1234);
+            let seed = seed as u64;
+            eprintln!("Seed is {} (line was {})", seed, line);
+            seed
+        } else {
+            DEFAULT_SEED
+        };
+        let mut rng = Xoshiro256StarStar::seed_from_u64(seed);
 
         let alpha =
             Uniform::new_inclusive(config.read().await.alpha_min, config.read().await.alpha_max)
                 .sample(&mut rng);
         let offset = Uniform::new(0, config.read().await.max_zipf_offset).sample(&mut rng);
         let distr = Zipf::new(zipf_n, alpha).unwrap();
-
-        let (mut socket, client_info) = listener.accept().await?;
-        eprintln!(
-            "Serving {:?} with alpha {} offset {} {:?}",
-            client_info, alpha, offset, config
-        );
 
         let limiter = RateLimiter::new(std::time::Duration::from_secs_f64(
             1.0 / config.read().await.max_rate,
