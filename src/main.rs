@@ -13,8 +13,6 @@ use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 use tokio_utils::RateLimiter;
 
-const DEFAULT_SEED: u64 = 1234;
-
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq)]
 struct Config {
     /// the port to listen to
@@ -30,6 +28,8 @@ struct Config {
     /// Otherwise just uses [[DEFAULT_SEED]] as the seed.
     #[serde(default = "Config::default_ask_seed")]
     ask_seed: bool,
+    #[serde(default = "Config::default_default_seed")]
+    default_seed: u64,
 }
 
 impl Config {
@@ -42,6 +42,10 @@ impl Config {
 
     fn default_ask_seed() -> bool {
         true
+    }
+
+    fn default_default_seed() -> u64 {
+        1234
     }
 }
 
@@ -83,7 +87,9 @@ async fn main() -> io::Result<()> {
         let mut reader = BufReader::new(&mut socket);
         eprintln!("Serving {:?}", client_info,);
 
-        let seed = if config.read().await.ask_seed {
+        let cfg = config.read().await;
+
+        let seed = if cfg.ask_seed {
             let mut line = String::new();
             reader.read_line(&mut line).await?;
             let seed = line.trim().parse::<i64>().unwrap_or(1234);
@@ -91,8 +97,9 @@ async fn main() -> io::Result<()> {
             eprintln!("Seed is {} (line was {})", seed, line);
             seed
         } else {
-            DEFAULT_SEED
+            cfg.default_seed
         };
+        eprintln!("Using seed {}", seed);
         let mut rng = Xoshiro256StarStar::seed_from_u64(seed);
 
         let alpha =
