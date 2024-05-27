@@ -1,5 +1,11 @@
+# The port to listen on
 port = 8888
+# The size of the set to be streamed
 size = 50000
+# Limit the rate of the stream
 max_rate = 100000000
+# whether to use a random seed for each connection received
 random_seed = false
+# The pairs in this list denote how many (first element) items should have the given (second
+# element) proportion in the stream
 proportions = [[10, 0.08], [4, 0.04]]
