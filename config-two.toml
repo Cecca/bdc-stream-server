@@ -1,0 +1,5 @@
+port = 8887
+size = 50000
+max_rate = 100000000
+random_seed = true
+proportions = [[10, 0.08]]

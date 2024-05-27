@@ -1,5 +1,6 @@
+use rand::distributions::WeightedIndex;
 use rand::prelude::*;
-use rand_distr::{Bernoulli, Uniform, Zipf};
+use rand_distr::Uniform;
 use rand_xoshiro::Xoshiro256StarStar;
 use serde::Deserialize;
 use std::io::prelude::*;
@@ -13,23 +14,25 @@ use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 use tokio_utils::RateLimiter;
 
-#[derive(Deserialize, Debug, Clone, Copy, PartialEq)]
+#[derive(Deserialize, Debug, Clone, PartialEq)]
 struct Config {
     /// the port to listen to
     port: usize,
-    zipf_upper: u64,
-    alpha_min: f64,
-    alpha_max: f64,
-    uniform_max: u64,
-    prob_of_uniform: f64,
-    max_zipf_offset: u64,
+    /// the number of elements to generate
+    size: usize,
+    /// limit the rate of this stream to this many elements per second
     max_rate: f64,
+    /// The pairs in this list denote how many (first element) items should have the given (second
+    /// element) proportion in the stream
+    proportions: Vec<(usize, f64)>,
     /// if `true`, then the socket first reads an integer to be used as seed.
     /// Otherwise just uses [[DEFAULT_SEED]] as the seed.
     #[serde(default = "Config::default_ask_seed")]
     ask_seed: bool,
     #[serde(default = "Config::default_default_seed")]
     default_seed: u64,
+    #[serde(default = "Config::default_random_seed")]
+    random_seed: bool,
 }
 
 impl Config {
@@ -41,7 +44,11 @@ impl Config {
     }
 
     fn default_ask_seed() -> bool {
-        true
+        false
+    }
+
+    fn default_random_seed() -> bool {
+        false
     }
 
     fn default_default_seed() -> u64 {
@@ -78,16 +85,12 @@ async fn main() -> io::Result<()> {
     let listener = TcpListener::bind(format!("0.0.0.0:{}", config.read().await.port)).await?;
 
     loop {
-        // Set up distributions
-        let zipf_n = config.read().await.zipf_upper;
-        let background = Uniform::new(0, config.read().await.uniform_max);
-        let balancer = Bernoulli::new(config.read().await.prob_of_uniform).unwrap();
-
         let (mut socket, client_info) = listener.accept().await?;
         let mut reader = BufReader::new(&mut socket);
         eprintln!("Serving {:?}", client_info,);
 
         let cfg = config.read().await;
+        let m: usize = cfg.size;
 
         let seed = if cfg.ask_seed {
             let mut line = String::new();
@@ -96,34 +99,48 @@ async fn main() -> io::Result<()> {
             let seed = seed as u64;
             eprintln!("Seed is {} (line was {})", seed, line);
             seed
+        } else if cfg.random_seed {
+            rand::thread_rng().sample(Uniform::new(0u64, u64::MAX))
         } else {
             cfg.default_seed
         };
         eprintln!("Using seed {}", seed);
         let mut rng = Xoshiro256StarStar::seed_from_u64(seed);
 
-        let alpha =
-            Uniform::new_inclusive(config.read().await.alpha_min, config.read().await.alpha_max)
-                .sample(&mut rng);
-        let offset = Uniform::new(0, config.read().await.max_zipf_offset).sample(&mut rng);
-        let distr = Zipf::new(zipf_n, alpha).unwrap();
+        let elements: Vec<u32> = Uniform::new(0u32, u32::MAX)
+            .sample_iter(&mut rng)
+            .take(m)
+            .collect();
+        let mut weights = vec![0.0; m];
+
+        let mut i = 0;
+        let mut attributed_weight = 0.0;
+        for (n, prop) in &cfg.proportions {
+            for _ in 0..*n {
+                weights[i] = *prop;
+                attributed_weight += *prop;
+                i += 1;
+            }
+        }
+        let rem_weight = (1.0 - attributed_weight) / (elements.len() - i) as f64;
+        while i < elements.len() {
+            weights[i] = rem_weight;
+            i += 1;
+        }
+
+        let distr = WeightedIndex::new(weights).unwrap();
 
         let limiter = RateLimiter::new(std::time::Duration::from_secs_f64(
             1.0 / config.read().await.max_rate,
         ));
         tokio::spawn(async move {
-            // let mut socket = BufWriter::new(socket);
             let mut buf = Vec::new();
             let mut cnt = 0;
             let t_start = Instant::now();
             loop {
                 let is_err = limiter
                     .throttle(|| async {
-                        let s: u64 = if balancer.sample(&mut rng) {
-                            background.sample(&mut rng)
-                        } else {
-                            offset + distr.sample(&mut rng).floor() as u64
-                        };
+                        let s = elements[distr.sample(&mut rng)];
                         buf.clear();
                         writeln!(buf, "{}", s).unwrap();
                         cnt += 1;

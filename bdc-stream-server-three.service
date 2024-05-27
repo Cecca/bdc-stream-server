@@ -1,0 +1,13 @@
+[Unit]
+Description=The never-ending stream generator for BDC
+After=network.target
+
+[Service]
+WorkingDirectory=%h
+ExecStart=%h/.cargo/bin/bdc-stream-server %h/streamer-three.toml
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+
