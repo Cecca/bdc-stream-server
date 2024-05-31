@@ -110,6 +110,7 @@ async fn main() -> io::Result<()> {
         let elements: Vec<u32> = Uniform::new(0u32, u32::MAX)
             .sample_iter(&mut rng)
             .take(m)
+            .map(|x| x & !(1 << 31))
             .collect();
         let mut weights = vec![0.0; m];
 
